@@ -92,12 +92,19 @@ def ui_and_triggers(input_dir, arc_dir, pause=False):
     from infrastructure.stages.frontend.context import load_frontend_context
     from infrastructure.stages.frontend.ui.design import INSTRUCTIONS as UI_RULES
     from infrastructure.stages.frontend.triggers.prompts import INSTRUCTIONS as TRIGGER_RULES
-    from infrastructure.stages.backend.primitives import validate_design
+    from infrastructure.stages.backend.primitives import validate_design, ObligationCoverageError
     (arc_dir / 'joint_frontend.json').unlink(missing_ok=True)
     tree, schema, backend, images, contexts = load_frontend_context(arc_dir, input_dir)
     raw = read_artifact(arc_dir, 'requirements.json')
     effects = read_artifact(arc_dir, 'db_obligations.json')
-    validate_design(backend, effects, tree=tree)
+    try:
+        validate_design(backend, effects, tree=tree)
+    except (KeyError, ObligationCoverageError) as error:
+        # Preserve presentation when upstream API design is only partially available.
+        (arc_dir / 'frontend_triggers.json').unlink(missing_ok=True)
+        DemoConsole(pause).show('Incomplete backend | Use independent UI design', str(error))
+        from infrastructure.pipeline.ui_design import design_frontend_ui
+        return design_frontend_ui(input_dir, arc_dir, pause=pause)
     plan = publish_plan(raw, arc_dir, policy().group_size)
     model, console = TextModel(json_mode=False), DemoConsole(pause)
     ui, triggers = empty_design(), empty_triggers(tree)
@@ -192,6 +199,9 @@ def validate_ui_links(ui, triggers, tree, ids, backend):
 
 
 def consume_triggers(input_dir, arc_dir, pause=False):
+    if not (arc_dir / 'joint_frontend.json').is_file():
+        from infrastructure.pipeline.frontend_triggers import design_frontend_triggers
+        return design_frontend_triggers(input_dir, arc_dir, pause=pause)
     raw, schema, backend, effects, visual, ui, triggers = (read_artifact(arc_dir, name) for name in
         ('requirements.json', 'db_schema.json', 'backend_apis.json', 'db_obligations.json',
          'visual_analysis.json', 'ui_design.json', 'frontend_triggers.json'))
