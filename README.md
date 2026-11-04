@@ -130,3 +130,11 @@ Numbered scripts orchestrate each pass. Domain logic lives in `infrastructure/st
 | Acceptance | Domain `testing.py` and runtime modules. | Support other application stacks or execution environments. |
 
 Keep each task focused on one requirement. Retrieve shared knowledge on demand, preserve canonical contracts, and use executable checks to accept changes.
+
+## Experimental lower-cost workflow
+
+Add `--optimize` to try bounded feature-group design, joint schema/obligation and UI/interaction proposals, deterministic SQL for ordinary tables, bounded file-agent context, and current-first regression checks. Independent final requirement acceptance is preserved. Use a fresh output directory and compare against the original mode before adopting it. See [OPTIMIZATION.md](OPTIMIZATION.md) for budgets, stage handoffs, verification and current limits.
+
+```bash
+uv run main.py input --output-dir outputs/optimized --optimize --model-log
+```

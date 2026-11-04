@@ -358,7 +358,12 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                         result["backend_tests"] = api_checks.tests(suites)
                         if result["backend_tests"]["returncode"]:
                             return result
-                result["e2e"] = checks.tests(regression_files)
+                from infrastructure.shared.agent.optimization import policy
+                from infrastructure.shared.agent.checks import current_first
+                result["e2e"] = (current_first(checks.tests, [relative], regression_files)
+                    if policy().enabled else checks.tests(regression_files))
+                if policy().enabled and test_run_status(result['e2e']) != 'GREEN':
+                    return result
                 if ui_files:
                     result["ui"] = ui_checks.tests(ui_files)
                 return result

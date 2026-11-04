@@ -54,6 +54,10 @@ class Compiler:
     def _run(self, stage: str, function, *arguments, **options):
         """Attempt every pass; keep failures explicit without aborting later passes."""
         self.current_stage = stage
+        from infrastructure.shared.agent.optimization import policy
+        if policy().enabled:
+            from infrastructure.pipeline.optimized_design import optimized_stage
+            function = optimized_stage(stage, function)
         try:
             with console_log(self.output_dir, stage=stage,
                     model_log=self.model_log, debug_model_io=self.model_log):
@@ -94,6 +98,10 @@ class Compiler:
                     break
             if not passes:
                 raise ValueError(f"Unknown stage: {stage}. Use a full stage name such as 06_implement_backend_tdd.")
+        from infrastructure.shared.agent.optimization import policy
+        if policy().enabled:
+            from dataclasses import asdict
+            save_json(self.arc_dir / 'optimization.json', asdict(policy()))
         self.artifacts.clear()
         self.report = {"status": "RUNNING", "stages": {}}
         show_panel("Requirement compiler | Pipeline",

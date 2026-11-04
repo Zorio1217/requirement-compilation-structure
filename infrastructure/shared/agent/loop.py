@@ -1,6 +1,7 @@
 """Bounded file editing with failure attribution and real acceptance checks."""
 
 import json
+import time
 
 from infrastructure.shared.agent.discovery import DISCOVERY_RULES, DiscoverySession
 from infrastructure.shared.agent.conventions import task_conventions
@@ -31,6 +32,29 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
     """
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
+    from infrastructure.shared.agent.optimization import policy
+    from infrastructure.shared.agent.planning import task_feature
+    from infrastructure.shared.agent.packet import task_files
+    settings = policy()
+    calls_used = reads_used = 0
+    started = time.monotonic()
+    def record_metrics(status, rounds):
+        if not settings.enabled:
+            return
+        audit = files.output / '.arc/agent_metrics.jsonl'
+        audit.parent.mkdir(parents=True, exist_ok=True)
+        with audit.open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps({'task': label, 'status': status,
+                'model_calls': calls_used, 'read_requests': reads_used, 'edit_rounds': rounds,
+                'seconds': round(time.monotonic() - started, 3)}) + '\n')
+    previous_failure = None
+    repeated_failures = 0
+    if settings.enabled:
+        task = {**task, 'feature_context': task_feature(files.output, task),
+            'acceptance_rule': 'Real stage checks decide success; preserve original requirement outcomes.'}
+        instructions += "\nBatch missing related reads in one request, then submit cohesive local edits. " \
+            "Use supplied file contents first. On repeated failures reconsider the responsible upstream contract " \
+            "or shared implementation before trying the same repair again."
     index = context_index if allow_discovery else None
     allow_discovery = index is not None
     discovery, context_result = DiscoverySession(index), None
@@ -43,6 +67,11 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
         response, applied, checking = None, False, False
         try:
             def request_model():
+                nonlocal calls_used
+                if settings.enabled and calls_used >= settings.max_calls:
+                    raise AgentExhausted(label, turn, {'error': 'Model call budget exhausted',
+                        'model_calls': calls_used, 'read_requests': reads_used})
+                calls_used += 1
                 # Gates may regenerate wiring outside edit_file; discard stale excerpts too.
                 for path, excerpts in list(read_files.items()):
                     target = files.path(path)
@@ -55,10 +84,17 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         if len(lines) != excerpt["total_lines"] or content != excerpt["content"]:
                             read_files.pop(path)
                             break
-                request = {"task": files.task_state(task), "files": files.state(), "feedback": feedback,
+                request = {"task": files.task_state(task), "files": (task_files(files) if settings.enabled else files.state()), "feedback": feedback,
                     "context_kinds": list(index.records()) if index is not None else [], "tools": files.schemas()}
                 if read_files:
-                    request["read_files"] = read_files
+                    # Pinned files already carry current complete contents in input.files.
+                    request["read_files"] = ({path: excerpts for path, excerpts in read_files.items()
+                        if path not in request['files'] or request['files'][path].get('excerpt')} if settings.enabled else read_files)
+                if settings.enabled:
+                    request['budget'] = {'calls_remaining': settings.max_calls - calls_used,
+                        'read_requests_remaining': settings.max_reads - reads_used}
+                    if repeated_failures >= 2:
+                        request['repair_focus'] = 'Same failure repeated: diagnose the cause or upstream contract; do not repeat the same patch.'
                 if discovery.evidence:
                     request["context_records"] = discovery.evidence
                 if any(discovery.candidates.values()):
@@ -76,6 +112,13 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 return model.generate_json(rules, request)
             response = request_model()
             while isinstance(response, dict):
+                reading = settings.enabled and ('context_request' in response or ('tool_calls' in response
+                    and files.effect(response['tool_calls']) == 'read'))
+                if settings.enabled and reading:
+                    if reads_used >= settings.max_reads:
+                        raise AgentExhausted(label, turn, {'error': 'Read/discovery budget exhausted',
+                            'model_calls': calls_used, 'read_requests': reads_used})
+                    reads_used += 1
                 if "context_request" in response:
                     if not allow_discovery:
                         raise ValueError("Semantic discovery is disabled for this task; use the supplied task evidence and read_file within its allowed scope")
@@ -133,9 +176,20 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             checks = gate()
             checkpoint(files.output, task=label, action=f"Accept edit round {turn}",
                 details={"round": turn, "checks": checks})
+            record_metrics('GREEN', turn)
             return {"turns": turn, "checks": checks}
+        except AgentExhausted:
+            record_metrics('BUDGET_EXHAUSTED', turn)
+            raise
         except (*RESPONSE_ERRORS, RuntimeError, OSError) as error:
             message = str(error)
+            if settings.enabled:
+                repeated_failures = repeated_failures + 1 if message == previous_failure else 1
+                previous_failure = message
+                if repeated_failures >= 3:
+                    record_metrics('STALLED', turn)
+                    raise AgentExhausted(label, turn, {'error': 'Same check failure repeated three times',
+                        'last_failure': message, 'next_action': 'Review original requirement and upstream contract before retrying.'}) from error
             console.show(f"{label} | Repair feedback", message)
             rejected = (getattr(error, "feedback", {"error": message}) if applied
                 else response_feedback(error, response))
@@ -149,4 +203,5 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 feedback = [*check_feedback, rejected]
             checkpoint(files.output, task=label, action=f"Reject edit round {turn}", status="REJECTED",
                 details={"round": turn, "applied": applied, "feedback": feedback})
+    record_metrics('EXHAUSTED', max_turns)
     raise AgentExhausted(label, max_turns, feedback)

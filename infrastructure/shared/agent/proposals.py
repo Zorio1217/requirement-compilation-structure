@@ -40,7 +40,16 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
     """Generate and repair a proposal within a finite total model-call budget."""
     if max_attempts < 1:
         raise ValueError("--max-attempts must be positive")
+    from infrastructure.shared.agent.optimization import policy
+    settings = policy()
+    calls_used = reads_used = 0
     request = dict(request)
+    def generate(prompt):
+        nonlocal calls_used
+        if settings.enabled and calls_used >= settings.max_calls:
+            raise RuntimeError(f'{label}: model call budget exhausted ({calls_used})')
+        calls_used += 1
+        return model.generate_json(prompt, request)
     if context_index is not None:
         instructions += "\n\n" + DISCOVERY_RULES
         request["context_kinds"] = list(context_index.records())
@@ -56,14 +65,17 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
                 prompt += "\nActual failure: " + correction["error"]
                 if correction.get("details"):
                     prompt += "\nRepair details:\n" + json.dumps(correction["details"], ensure_ascii=False, indent=2)
-            response = model.generate_json(prompt, request)
+            response = generate(prompt)
             while context_index is not None and isinstance(response, dict) and "context_request" in response:
+                if settings.enabled and reads_used >= settings.max_reads:
+                    raise RuntimeError(f'{label}: discovery budget exhausted ({reads_used})')
+                reads_used += 1
                 query = response["context_request"]
                 console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                 request["context_result"] = discovery.resolve(query)
                 request["context_records"] = discovery.evidence
                 request["context_candidates"] = discovery.candidates
-                response = model.generate_json(prompt, request)
+                response = generate(prompt)
             accepted = accept(response)
             checkpoint(task=label, action=f"Accept design proposal {attempt}",
                 details={"attempt": attempt, "sections": list(response) if isinstance(response, dict) else []})

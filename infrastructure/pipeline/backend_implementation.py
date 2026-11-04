@@ -230,7 +230,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         compiled = checks.typecheck(regression_files)
                         if compiled["returncode"]:
                             return {"typecheck": compiled, "tests": None}
-                        tested = checks.tests(regression_files)
+                        from infrastructure.shared.agent.optimization import policy
+                        from infrastructure.shared.agent.checks import current_first
+                        tested = (current_first(checks.tests, files_by_api[aid], regression_files)
+                            if policy().enabled else checks.tests(regression_files))
                         return {"typecheck": compiled, "tests": tested}
 
                     def implementation_gate():

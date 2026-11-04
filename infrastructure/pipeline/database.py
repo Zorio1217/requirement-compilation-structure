@@ -113,8 +113,16 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                         raise ValueError("Create the current SQL output_path with edit_file")
                     return {"path": expected_path, "status": "GENERATED"}
 
-                run_file_agent(model, INSTRUCTIONS, request, tools, generated_table,
-                    max_attempts, console, f"SQL implementation {name}", allow_discovery=False)
+                from infrastructure.shared.agent.optimization import policy
+                from infrastructure.stages.database.lowering import lower_table
+                generated = lower_table(name, entity) if policy().enabled else None
+                # Preserve existing user/runtime repairs on a resumed run.
+                if generated is not None and not (output_dir / expected_path).exists():
+                    save_text(output_dir / expected_path, generated)
+                    console.show(f"SQL implementation {name}", "Deterministic schema lowering; no model call.")
+                elif not (policy().enabled and generated is not None):
+                    run_file_agent(model, INSTRUCTIONS, request, tools, generated_table,
+                        max_attempts, console, f"SQL implementation {name}", allow_discovery=False)
                 content = read_source(output_dir / expected_path)
                 proposal = {"path": expected_path, "content": content}
                 target = output_dir / expected_path

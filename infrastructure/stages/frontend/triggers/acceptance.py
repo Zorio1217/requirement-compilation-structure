@@ -186,7 +186,10 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                         evidence['typecheck'] = checks.typecheck([*process_files, *acceptance_files])
                         if evidence['typecheck']['returncode']:
                             raise ValueError(evidence['typecheck']['output'])
-                        evidence['acceptance'] = checks.tests(acceptance_files)
+                        from infrastructure.shared.agent.optimization import policy
+                        from infrastructure.shared.agent.checks import current_first
+                        evidence['acceptance'] = (current_first(checks.tests, [path], acceptance_files)
+                            if policy().enabled else checks.tests(acceptance_files))
                         require_acceptance(evidence['acceptance'])
                         if process_files:
                             evidence['smoke'] = checks.tests(process_files)

@@ -27,8 +27,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stage", choices=[name for name, _, _ in PIPELINE], metavar="STAGE",
         help="Run one stage by its full name (e.g. 06_implement_backend_tdd); omit for the full pipeline")
     parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
+    parser.add_argument('--optimize', action='store_true', help='Use grouped design, bounded agents and staged regression')
+    parser.add_argument('--agent-max-calls', type=int, default=24, help='Maximum model calls per optimized task')
+    parser.add_argument('--agent-max-reads', type=int, default=6, help='Maximum read/discovery requests per optimized task')
     args = parser.parse_args(argv)
     try:
+        if min(args.agent_max_calls, args.agent_max_reads) < 1:
+            raise ValueError('Agent budgets must be positive')
         if not 1 <= args.port <= 65535:
             raise ValueError("--port must be between 1 and 65535")
         args.requirement_path, args.output_dir = resolve_directories(
@@ -50,7 +55,9 @@ def main(argv: list[str] | None = None) -> None:
     compiler = Compiler(args.requirement_path, args.output_dir,
         model_log=args.model_log, port=args.port, pause=args.pause)
     try:
-        compiler.compile(stage=args.stage)
+        from infrastructure.shared.agent.optimization import optimized_run
+        with optimized_run(args.optimize, max_calls=args.agent_max_calls, max_reads=args.agent_max_reads):
+            compiler.compile(stage=args.stage)
     except KeyboardInterrupt:
         print(f"Compilation interrupted at {compiler.current_stage or 'startup'}.", file=sys.stderr)
         raise SystemExit(130)

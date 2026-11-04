@@ -113,7 +113,10 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             compiled = checks.typecheck(files)
             if compiled["returncode"]:
                 return {"typecheck": compiled, "tests": None}
-            tested = checks.tests(files)
+            from infrastructure.shared.agent.optimization import policy
+            from infrastructure.shared.agent.checks import current_first
+            tested = (current_first(checks.tests, [relative], files)
+                if policy().enabled else checks.tests(files))
             return {"typecheck": compiled, "tests": tested}
 
         def implementation_gate():
