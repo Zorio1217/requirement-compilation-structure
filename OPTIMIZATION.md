@@ -34,3 +34,13 @@ uv run main.py input --output-dir outputs/optimized --optimize --model-log
 ```
 
 Inspect `.arc/compilation.json` and `.arc/independent_acceptance.json` before comparing cost. `model_calls.jsonl` records provider-reported usage and per-call latency; `.arc/agent_metrics.jsonl` records logical task calls, reads, edit rounds and task duration for optimized runs. Compare the same external/official business tests and account for unfinished/failed runs. Lower cost caused by early task failure is not an efficiency improvement.
+
+## ARC-Bench submission mode
+
+The platform invokes `python main.py <input> --output-dir <output>` and does not append `--optimize`. Source mode still defaults to the original pipeline. To actually submit the optimized mode, create a package with:
+
+```bash
+uv run python scripts/package.py --workflow optimized --output outputs/compiler-optimized.zip
+```
+
+The ZIP contains `compiler_config.json` with `workflow=optimized`; packaging does not change the local default or store model credentials. `main.py` prints the selected workflow at startup. `--optimize` or `--no-optimize` explicitly overrides the packaged setting. Use `--workflow baseline` for a baseline submission. Archives exclude `.env` and credential variants, older ZIPs, `node_modules` and virtual environments. This corrects mode selection; it does not establish the cause of a particular zero-score run. Use the first failure in platform history to diagnose model/runtime/business failures.

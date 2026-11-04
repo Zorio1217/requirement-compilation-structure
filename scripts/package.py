@@ -1,17 +1,19 @@
-"""Zip the current Git working directory, respecting Git ignore rules except for .env.
+"""Zip the current Git working directory, respecting Git ignore rules and excluding local credentials.
 
 Windows:       python scripts/package.py
 Linux / macOS: python3 scripts/package.py
 Custom name:   python scripts/package.py --output release.zip
 
 Requires Git on PATH and a working tree containing the current directory.
-Include .env files, .gitignore files, modified files, and non-ignored untracked files.
+Include .gitignore files, modified files, and non-ignored untracked files.
+Use --workflow optimized to enable optimization when the platform supplies no CLI flag.
 Exclude .git metadata and this invocation's output and temporary archive.
 Nested repositories such as arc-bench use their own Git ignore rules.
 Symbolic links are stored as links without traversing their targets.
 """
 
 import argparse
+import json
 import os
 from pathlib import Path
 import stat
@@ -30,8 +32,15 @@ def ignored_names(directory: Path, paths: list[Path]) -> set[str]:
     return {os.fsdecode(name) for name in result.stdout.split(b"\0") if name}
 
 
-def package_directory(root: Path, output: Path) -> int:
-    """Archive non-ignored entries and .env, replacing the output only on success."""
+def package_directory(root: Path, output: Path, workflow: str | None = None) -> int:
+    """Archive sources without secrets; optionally select a platform workflow in the ZIP."""
+    if workflow is not None:
+        if workflow not in {'baseline', 'optimized'}:
+            raise ValueError('workflow must be baseline or optimized')
+        for relative in ('main.py', 'requirements.txt', 'infrastructure/compiler.py',
+                'infrastructure/shared/project/templates/deploy.sh'):
+            if not (root / relative).is_file():
+                raise ValueError(f'Missing submission dependency: {relative}')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(prefix=f".{output.name}.", suffix=".tmp",
             dir=output.parent, delete=False) as temporary:
@@ -46,12 +55,15 @@ def package_directory(root: Path, output: Path) -> int:
             while pending:
                 directory = pending.pop()
                 paths = [path for path in sorted(directory.iterdir())
-                    if path.name != ".git" and path not in excluded]
+                    if path.name not in {'.git', '.venv', 'node_modules', '__pycache__', 'work'}
+                    and path not in excluded and path.suffix.lower() != '.zip'
+                    and not (path.name == '.env' or (path.name.startswith('.env.') and path.name != '.env.example'))
+                    and not (workflow is not None and path == root / 'compiler_config.json')]
                 if not paths:
                     continue
                 ignored = ignored_names(directory, paths)
                 for path in paths:
-                    if path.name in ignored and path.name != ".env":
+                    if path.name in ignored:
                         continue
                     relative = path.relative_to(root).as_posix()
                     if path.is_symlink():
@@ -68,6 +80,9 @@ def package_directory(root: Path, output: Path) -> int:
                         kind = stat.S_IFMT(path.lstat().st_mode)
                         raise OSError(f"Cannot archive special file {path} (type {kind:#o})")
                     entries += 1
+            if workflow is not None:
+                archive.writestr('compiler_config.json', json.dumps({'workflow': workflow}) + '\n')
+                entries += 1
         os.replace(temporary_path, output)
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -79,13 +94,15 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-o", "--output", type=Path, default=Path("compiler.zip"),
         help="Output archive path (default: compiler.zip)")
+    parser.add_argument('--workflow', choices=['baseline', 'optimized'],
+        help='Select the workflow inside the submission ZIP without changing local source defaults')
     args = parser.parse_args()
     root = Path.cwd().resolve()
     output = args.output.expanduser().resolve()
     print(f"Source: {root}")
     print(f"Archive: {output}")
     try:
-        entries = package_directory(root, output)
+        entries = package_directory(root, output, args.workflow)
     except (OSError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile) as error:
         parser.exit(1, f"Packaging failed: {error}\n")
     print(f"Created {output} ({entries} entries, {output.stat().st_size:,} bytes)")

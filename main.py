@@ -1,6 +1,7 @@
 """Compile a requirement directory into an executable application."""
 
 import argparse
+import json
 from pathlib import Path
 import sys
 
@@ -12,6 +13,14 @@ from infrastructure.utils.presentation.stages import stage_label
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Read public options and validate paths and the backend port before compilation."""
+    config_path = Path(__file__).with_name('compiler_config.json')
+    try:
+        config = json.loads(config_path.read_text(encoding='utf-8')) if config_path.is_file() else {}
+        workflow = config.get('workflow', 'baseline')
+        if workflow not in {'baseline', 'optimized'}:
+            raise ValueError('workflow must be baseline or optimized')
+    except (OSError, ValueError, AttributeError) as error:
+        raise ValueError(f'Invalid compiler_config.json: {error}') from error
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Stages:\n" + "\n".join(
@@ -27,7 +36,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stage", choices=[name for name, _, _ in PIPELINE], metavar="STAGE",
         help="Run one stage by its full name (e.g. 06_implement_backend_tdd); omit for the full pipeline")
     parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
-    parser.add_argument('--optimize', action='store_true', help='Use grouped design, bounded agents and staged regression')
+    parser.add_argument('--optimize', action=argparse.BooleanOptionalAction, default=workflow == 'optimized',
+        help='Use grouped design, bounded agents and staged regression; defaults to compiler_config.json')
     parser.add_argument('--agent-max-calls', type=int, default=24, help='Maximum model calls per optimized task')
     parser.add_argument('--agent-max-reads', type=int, default=6, help='Maximum read/discovery requests per optimized task')
     args = parser.parse_args(argv)
@@ -54,6 +64,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     compiler = Compiler(args.requirement_path, args.output_dir,
         model_log=args.model_log, port=args.port, pause=args.pause)
+    print('Compiler workflow: ' + ('optimized' if args.optimize else 'baseline'), flush=True)
     try:
         from infrastructure.shared.agent.optimization import optimized_run
         with optimized_run(args.optimize, max_calls=args.agent_max_calls, max_reads=args.agent_max_reads):
