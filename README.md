@@ -131,10 +131,10 @@ Numbered scripts orchestrate each pass. Domain logic lives in `infrastructure/st
 
 Keep each task focused on one requirement. Retrieve shared knowledge on demand, preserve canonical contracts, and use executable checks to accept changes.
 
-## Experimental lower-cost workflow
+## Default optimized workflow
 
-Add `--optimize` to try bounded feature-group design, joint schema/obligation and UI/interaction proposals, deterministic SQL for ordinary tables, bounded file-agent context, and current-first regression checks. Independent final requirement acceptance is preserved. Use a fresh output directory and compare against the original mode before adopting it. See [OPTIMIZATION.md](OPTIMIZATION.md) for budgets, stage handoffs, verification and current limits.
+Running `main.py` enables bounded feature-group design, joint schema/obligation and UI/interaction proposals, deterministic SQL for ordinary tables, bounded file-agent context, and current-first regression checks by default. No extra platform flags or packaging mode are required. Independent final requirement acceptance is preserved. Use `--no-optimize` only for an explicit baseline comparison. See [OPTIMIZATION.md](OPTIMIZATION.md) for budgets, stage handoffs, verification and current limits.
 
 ```bash
-uv run main.py input --output-dir outputs/optimized --optimize --model-log
+uv run main.py input --output-dir outputs/optimized --model-log
 ```

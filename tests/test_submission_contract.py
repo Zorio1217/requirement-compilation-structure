@@ -26,7 +26,14 @@ class SubmissionContract(unittest.TestCase):
                 argv = [str(root), '--output-dir', str(root.parent / (root.name + '-output'))]
                 self.assertTrue(main.parse_args(argv).optimize)
                 self.assertFalse(main.parse_args([*argv, '--no-optimize']).optimize)
-            self.assertFalse(main.parse_args(argv).optimize)
+                config.unlink()
+                self.assertTrue(main.parse_args(argv).optimize)
+                config.write_text('{}')
+                self.assertTrue(main.parse_args(argv).optimize)
+                config.write_text('{"workflow":"baseline"}')
+                self.assertFalse(main.parse_args(argv).optimize)
+                self.assertTrue(main.parse_args([*argv, '--optimize']).optimize)
+            self.assertTrue(main.parse_args(argv).optimize)
 
     def test_zip_excludes_credentials_and_old_archives(self):
         with TemporaryDirectory() as tmp:
@@ -52,14 +59,23 @@ class SubmissionContract(unittest.TestCase):
                     self.assertFalse(name.endswith('.zip'))
                     self.assertFalse(name.startswith(('node_modules/', '.venv/')))
 
-    def test_platform_argv_uses_packaged_optimized_mode(self):
+    def test_platform_argv_enables_optimized_from_source_and_plain_zip(self):
+        for mode in ('source', 'plain_zip', 'optimized_zip'):
+            with self.subTest(mode=mode):
+                self.probe_platform_entry(mode)
+
+    def probe_platform_entry(self, mode):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             archive, source, output = root / 'submission.zip', root / 'task', root / 'app'
-            package_directory(ROOT, archive, 'optimized')
-            unpacked = root / 'compiler'
-            with zipfile.ZipFile(archive) as zipped:
-                zipped.extractall(unpacked)
+            unpacked = ROOT
+            if mode != 'source':
+                package_directory(ROOT, archive, 'optimized' if mode == 'optimized_zip' else None)
+                unpacked = root / 'compiler'
+                with zipfile.ZipFile(archive) as zipped:
+                    if mode == 'plain_zip':
+                        self.assertNotIn('compiler_config.json', zipped.namelist())
+                    zipped.extractall(unpacked)
             source.mkdir()
             (source / 'requirements.yaml').write_text('id: ROOT\nname: Static\nchildren: []\n')
             # All pipeline/import/argument/dispatch code is real. Only paid model invocation

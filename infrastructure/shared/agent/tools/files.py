@@ -7,7 +7,7 @@ from infrastructure.utils.paths import check_path_case, relative_path
 
 class FileToolError(ValueError):
     def __init__(self, code, message, path=None, **details):
-        super().__init__(message)
+        super().__init__(message + (f' [{path}]' if path is not None else ''))
         self.feedback = {"code": code, "message": message, **details}
         if path is not None:
             self.feedback["path"] = path

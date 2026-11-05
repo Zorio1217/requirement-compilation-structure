@@ -42,6 +42,8 @@ def supplied_sources(output: Path, api: dict, schema: dict) -> dict:
                     pending.append(target)
     paths = ["backend/src/api/types.ts", "backend/src/db/client.ts", "backend/tests/support/context.ts"]
     paths.extend(f"backend/src/db/tables/{name}.sql" for name in sorted(entities))
+    paths.extend(f"backend/src/db/seeds/{name}.sql" for name in sorted(entities)
+        if (output / f"backend/src/db/seeds/{name}.sql").is_file())
     return {relative: (output / relative).read_text(encoding="utf-8-sig") for relative in paths}
 
 

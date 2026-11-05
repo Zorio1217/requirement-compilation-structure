@@ -61,12 +61,28 @@ class FileTools:
     def schemas(self):
         return deepcopy([item[1] for item in TOOL_REGISTRY.values()])
 
+    @staticmethod
+    def normalize_calls(calls):
+        """Accept unambiguous argument wrappers, then apply the same tool/permission checks."""
+        if not isinstance(calls, list):
+            return calls
+        normalized = []
+        for call in calls:
+            if isinstance(call, dict) and isinstance(call.get('tool'), str) and call['tool'] in TOOL_REGISTRY:
+                for wrapper in ('arguments', 'parameters'):
+                    arguments = call.get(wrapper)
+                    if set(call) == {'tool', wrapper} and isinstance(arguments, dict) and 'tool' not in arguments:
+                        call = {'tool': call['tool'], **arguments}
+                        break
+            normalized.append(call)
+        return normalized
+
     def effect(self, calls):
         """Registered effects determine whether to continue reading or run acceptance."""
         if not isinstance(calls, list):
             raise FileToolError("INVALID_CALLS", "tool_calls must be an array")
         effects = set()
-        for number, call in enumerate(calls, 1):
+        for number, call in enumerate(self.normalize_calls(calls), 1):
             if not isinstance(call, dict) or not isinstance(call.get("tool"), str):
                 raise FileToolError("INVALID_CALL", "Each tool_calls item must be an object with a tool name",
                     call_index=number, examples=[item[1]["example"] for item in TOOL_REGISTRY.values()])
@@ -103,6 +119,7 @@ class FileTools:
 
     def execute(self, calls):
         """Validate/stage a complete edit batch, then publish or restore every affected file."""
+        calls = self.normalize_calls(calls)
         self.effect(calls)
         self._pending, self._target_path, self.last_changes = {}, None, []
         results, originals, written = [], {}, []

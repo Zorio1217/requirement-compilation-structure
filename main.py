@@ -16,7 +16,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     config_path = Path(__file__).with_name('compiler_config.json')
     try:
         config = json.loads(config_path.read_text(encoding='utf-8')) if config_path.is_file() else {}
-        workflow = config.get('workflow', 'baseline')
+        workflow = config.get('workflow', 'optimized')
         if workflow not in {'baseline', 'optimized'}:
             raise ValueError('workflow must be baseline or optimized')
     except (OSError, ValueError, AttributeError) as error:
@@ -37,7 +37,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run one stage by its full name (e.g. 06_implement_backend_tdd); omit for the full pipeline")
     parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
     parser.add_argument('--optimize', action=argparse.BooleanOptionalAction, default=workflow == 'optimized',
-        help='Use grouped design, bounded agents and staged regression; defaults to compiler_config.json')
+        help='Use grouped design, bounded agents and staged regression (default: enabled); explicit config/CLI may override')
     parser.add_argument('--agent-max-calls', type=int, default=24, help='Maximum model calls per optimized task')
     parser.add_argument('--agent-max-reads', type=int, default=6, help='Maximum read/discovery requests per optimized task')
     args = parser.parse_args(argv)

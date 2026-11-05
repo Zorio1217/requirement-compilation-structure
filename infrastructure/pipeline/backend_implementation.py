@@ -52,8 +52,12 @@ an incidental dependency. Necessary existing sessions/accounts can be prepared v
 Seed only required Given state directly through database with parameterized SQL and valid
 values; use 0/1 booleans. Read the actual shared helper/SQL definitions rather than guessing
 fixture arguments or password encodings. Initialization loads db/seeds/ENTITY.sql; reuse
-existing prerequisites instead of assuming empty tables or duplicating identities. Arrange
-scenario-specific absence/conflicting states in this isolated database. Do not invoke
+existing prerequisites instead of assuming empty tables or duplicating identities.
+Before INSERT, SELECT by the scenario's natural identity (such as an email) and reuse
+the existing row/id when present. Insert a genuinely missing Given record only; never
+disable UNIQUE/foreign-key constraints or weaken assertions to hide fixture collisions.
+The supplied related seed SQL is baseline data, not an operation to execute again.
+Arrange scenario-specific absence/conflicting states in this isolated database. Do not invoke
 another requirement's registration/creation API to manufacture Given data.
 
 Within max_tests cover meaningful success and critical requirement-defined rejection.

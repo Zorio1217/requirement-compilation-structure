@@ -6,7 +6,8 @@ Custom name:   python scripts/package.py --output release.zip
 
 Requires Git on PATH and a working tree containing the current directory.
 Include .gitignore files, modified files, and non-ignored untracked files.
-Use --workflow optimized to enable optimization when the platform supplies no CLI flag.
+Normal packages use main.py's optimized default without extra platform CLI flags.
+Use --workflow baseline only for an explicit baseline comparison package.
 Exclude .git metadata and this invocation's output and temporary archive.
 Nested repositories such as arc-bench use their own Git ignore rules.
 Symbolic links are stored as links without traversing their targets.
@@ -95,7 +96,7 @@ def main() -> None:
     parser.add_argument("-o", "--output", type=Path, default=Path("compiler.zip"),
         help="Output archive path (default: compiler.zip)")
     parser.add_argument('--workflow', choices=['baseline', 'optimized'],
-        help='Select the workflow inside the submission ZIP without changing local source defaults')
+        help='Explicit workflow override inside the ZIP; omitted uses main.py defaults (optimized)')
     args = parser.parse_args()
     root = Path.cwd().resolve()
     output = args.output.expanduser().resolve()

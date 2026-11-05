@@ -1,6 +1,7 @@
 """Retry model proposals when parsing or consuming their returned records fails."""
 
 import json
+import time
 
 from infrastructure.shared.agent.discovery import DISCOVERY_RULES, DiscoverySession
 from infrastructure.shared.project.git import checkpoint
@@ -42,14 +43,31 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
         raise ValueError("--max-attempts must be positive")
     from infrastructure.shared.agent.optimization import policy
     settings = policy()
-    calls_used = reads_used = 0
+    calls_used = reads_used = service_retries = 0
     request = dict(request)
     def generate(prompt):
-        nonlocal calls_used
-        if settings.enabled and calls_used >= settings.max_calls:
-            raise RuntimeError(f'{label}: model call budget exhausted ({calls_used})')
-        calls_used += 1
-        return model.generate_json(prompt, request)
+        nonlocal calls_used, service_retries
+        while True:
+            if settings.enabled and calls_used >= settings.max_calls:
+                raise RuntimeError(f'{label}: model call budget exhausted ({calls_used})')
+            calls_used += 1
+            try:
+                return model.generate_json(prompt, request)
+            except RuntimeError as error:
+                # TextModel preserves the SDK error as __cause__. A gateway failure
+                # has no model response to repair; retain this exact request/context.
+                status = getattr(error.__cause__, 'status_code', None)
+                if status not in {502, 503, 504} or service_retries >= 2:
+                    raise
+                if settings.enabled and calls_used >= settings.max_calls:
+                    raise
+                # The SDK already retried internally. Permit only two delayed
+                # recoveries across this entire task, including discovery/repair.
+                service_retries += 1
+                delay = 5 * service_retries
+                console.show(f'{label} | Temporary model service failure',
+                    f'HTTP {status}; retry {service_retries}/2 in {delay}s with unchanged request.')
+                time.sleep(delay)
     if context_index is not None:
         instructions += "\n\n" + DISCOVERY_RULES
         request["context_kinds"] = list(context_index.records())

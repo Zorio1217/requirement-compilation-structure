@@ -9,6 +9,7 @@ from infrastructure.shared.agent.conventions import task_conventions
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.tools.protocol import FILE_TOOL_RULES
 from infrastructure.shared.agent.proposals import RESPONSE_ERRORS, response_feedback
+from infrastructure.shared.agent.feedback import compact_feedback
 from infrastructure.shared.project.git import checkpoint
 from infrastructure.utils.files import read_source
 
@@ -17,7 +18,8 @@ class AgentExhausted(ValueError):
     """A recoverable task failure with the last real repair feedback."""
 
     def __init__(self, label, turns, feedback):
-        super().__init__(f"Agent exhausted {turns} rounds for {label}")
+        reason = feedback.get('error') if isinstance(feedback, dict) else None
+        super().__init__(f"Agent exhausted {turns} rounds for {label}" + (f': {reason}' if reason else ''))
         self.turns = turns
         self.feedback = feedback
 
@@ -34,7 +36,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
         raise ValueError("--max-turns must be positive")
     from infrastructure.shared.agent.optimization import policy
     from infrastructure.shared.agent.planning import task_feature
-    from infrastructure.shared.agent.packet import task_files
+    from infrastructure.shared.agent.packet import task_files, distinct_reads
     settings = policy()
     calls_used = reads_used = 0
     started = time.monotonic()
@@ -84,12 +86,12 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         if len(lines) != excerpt["total_lines"] or content != excerpt["content"]:
                             read_files.pop(path)
                             break
-                request = {"task": files.task_state(task), "files": (task_files(files) if settings.enabled else files.state()), "feedback": feedback,
+                task_state = files.task_state(task)
+                request = {"task": task_state, "files": (task_files(files, task=task_state, feedback=feedback) if settings.enabled else files.state()), "feedback": compact_feedback(feedback),
                     "context_kinds": list(index.records()) if index is not None else [], "tools": files.schemas()}
-                if read_files:
-                    # Pinned files already carry current complete contents in input.files.
-                    request["read_files"] = ({path: excerpts for path, excerpts in read_files.items()
-                        if path not in request['files'] or request['files'][path].get('excerpt')} if settings.enabled else read_files)
+                retained_reads = distinct_reads(read_files, request['files'])
+                if retained_reads:
+                    request['read_files'] = retained_reads
                 if settings.enabled:
                     request['budget'] = {'calls_remaining': settings.max_calls - calls_used,
                         'read_requests_remaining': settings.max_reads - reads_used}
@@ -112,6 +114,15 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 return model.generate_json(rules, request)
             response = request_model()
             while isinstance(response, dict):
+                query = response.get('context_request')
+                if allow_discovery and 'tool_calls' not in response and isinstance(query, dict) and query.get('kind') == 'file' and \
+                        isinstance(query.get('ids'), list) and query['ids'] and all(isinstance(path, str) for path in query['ids']):
+                    # Exact file IDs express a read request. Execute through FileTools
+                    # so workspace/read-only boundaries and batch limits still apply.
+                    response = {**response, 'tool_calls': [{'tool': 'read_file', 'path': path} for path in query['ids']]}
+                    response.pop('context_request')
+                if 'tool_calls' in response:
+                    response = {**response, 'tool_calls': files.normalize_calls(response['tool_calls'])}
                 reading = settings.enabled and ('context_request' in response or ('tool_calls' in response
                     and files.effect(response['tool_calls']) == 'read'))
                 if settings.enabled and reading:
